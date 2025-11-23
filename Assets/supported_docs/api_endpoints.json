@@ -1,0 +1,51 @@
+{
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/apply_coupon",
+      "description": "Validates and applies a discount code.",
+      "request_body": {
+        "code": "string"
+      },
+      "response": {
+        "success": true,
+        "discount_percent": 0.15,
+        "message": "Coupon applied successfully."
+      },
+      "example": {
+        "code": "SAVE15"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/submit_order",
+      "description": "Processes the final order and payment.",
+      "request_body": {
+        "name": "string",
+        "email": "string",
+        "address": "string",
+        "cart_items": [
+          {
+            "product_id": "integer",
+            "quantity": "integer"
+          }
+        ],
+        "payment_method": "string"
+      },
+      "response": {
+        "success": true,
+        "order_id": "12345",
+        "message": "Payment Successful!"
+      },
+      "example": {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "address": "123 Ocean Dr",
+        "cart_items": [
+          { "product_id": 1, "quantity": 2 }
+        ],
+        "payment_method": "credit_card"
+      }
+    }
+  ]
+}

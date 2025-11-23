@@ -1,0 +1,22 @@
+UI/UX Guidelines
+
+1. Color Palette
+   - Primary Action (Buttons, Links): Green (#22c55e) or Blue (#2563eb) depending on context.
+   - Error States: Red (#ef4444).
+   - Success States: Green (#22c55e).
+   - Background: Light Gray (#f8fafc).
+
+2. Typography
+   - Font Family: 'Inter', system-ui, sans-serif.
+   - Headings: Bold (700), Dark Slate (#1e293b).
+   - Body Text: Regular (400), Slate (#64748b).
+
+3. Form Behaviors
+   - Validation: Inline error messages must appear below the invalid field.
+   - Required Fields: Must be clearly marked or validated upon submission.
+   - "Pay Now" Button: Should be Green to indicate a positive final action.
+   - Input Focus: Highlight border with primary color.
+
+4. Feedback
+   - Success Message: "Payment Successful!" should appear in a modal or toast notification.
+   - Loading State: Buttons should show "Processing..." and be disabled during actions.
