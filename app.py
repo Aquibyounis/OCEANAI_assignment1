@@ -1,9 +1,12 @@
-import streamlit as st
-import requests
+import os
 import json
+import requests
+import streamlit as st
 from agent import generate_test_cases, generate_selenium_script
 
 BACKEND_URL = "http://127.0.0.1:8000"
+# Path of the uploaded HTML file available in the environment (provided to assistant)
+LOCAL_HTML_PATH = "/mnt/data/44f69aee-a339-48e3-853c-0ebabea98a94.html"
 
 st.set_page_config(page_title="QA Agent", layout="wide")
 st.title("🤖 Autonomous QA Agent")
@@ -13,6 +16,30 @@ if "test_plan" not in st.session_state:
 
 if "selected_db" not in st.session_state:
     st.session_state.selected_db = None
+
+# Try to fetch latest DB from backend on startup (no UI for choosing)
+def fetch_latest_db():
+    try:
+        resp = requests.get(f"{BACKEND_URL}/databases", timeout=5)
+        if resp.status_code == 200:
+            data = resp.json().get("databases", [])
+            if not data:
+                return None
+            # data is expected to be a list of dicts with keys "id" and "created_at"
+            # choose the most recent by created_at if present
+            try:
+                latest = sorted(data, key=lambda x: x.get("created_at", ""), reverse=True)[0]
+                return latest.get("id")
+            except Exception:
+                return data[0].get("id")
+    except Exception:
+        return None
+
+# Auto-populate selected_db from backend (latest) if not already set
+if not st.session_state.selected_db:
+    latest = fetch_latest_db()
+    if latest:
+        st.session_state.selected_db = latest
 
 tab1, tab2, tab3 = st.tabs([
     "📂 Phase 1: Knowledge Base",
@@ -27,48 +54,54 @@ with tab1:
     with col1:
         uploaded_docs = st.file_uploader("Support Docs (PDF, MD, JSON)", accept_multiple_files=True)
     with col2:
-        uploaded_html = st.file_uploader("Target HTML", type=["html"])
+        uploaded_html = st.file_uploader("Target HTML (checkout.html)", type=["html"])
 
     if st.button("🚀 Build Brain", type="primary"):
-        if uploaded_docs and uploaded_html:
+        if (uploaded_docs and (uploaded_html or os.path.exists(LOCAL_HTML_PATH))) or (uploaded_docs and uploaded_html):
             with st.spinner("Ingesting..."):
-                files = [("files", (d.name, d.getvalue(), d.type)) for d in uploaded_docs]
-                files.append(("html_file", (uploaded_html.name, uploaded_html.getvalue(), uploaded_html.type)))
+                files = []
+                for d in uploaded_docs:
+                    files.append(("files", (d.name, d.getvalue(), d.type)))
 
-                resp = requests.post(f"{BACKEND_URL}/ingest", files=files)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    st.success(data["message"])
-                    st.session_state.selected_db = data["db_id"]
-                else:
-                    st.error(resp.text)
+                # Prefer user-uploaded HTML; fallback to local HTML file path if not uploaded
+                if uploaded_html:
+                    files.append(("html_file", (uploaded_html.name, uploaded_html.getvalue(), uploaded_html.type)))
+                elif os.path.exists(LOCAL_HTML_PATH):
+                    # read local file bytes and send it
+                    with open(LOCAL_HTML_PATH, "rb") as f:
+                        files.append(("html_file", (os.path.basename(LOCAL_HTML_PATH), f.read(), "text/html")))
+
+                try:
+                    resp = requests.post(f"{BACKEND_URL}/ingest", files=files, timeout=120)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        st.success(data.get("message", "Ingest completed."))
+                        # backend should return db_id - if so, set it as selected DB
+                        db_id = data.get("db_id") or data.get("dbId") or data.get("id")
+                        if db_id:
+                            st.session_state.selected_db = db_id
+                        else:
+                            # fallback: re-fetch latest DB list
+                            st.session_state.selected_db = fetch_latest_db()
+                    else:
+                        st.error(resp.text)
+                except Exception as e:
+                    st.error(f"Connection Error: {e}")
         else:
-            st.warning("Upload all files.")
+            st.warning("Upload at least one support doc and a target HTML (or ensure local checkout.html exists).")
 
-    st.subheader("Available Databases")
-    try:
-        db_list = requests.get(f"{BACKEND_URL}/databases").json().get("databases", [])
-    except:
-        db_list = []
-
-    def db_label(x):
-        return f"{x['id']} — {x['created_at']}"
-
-    if db_list:
-        choice = st.selectbox(
-            "Select Knowledge Base",
-            db_list,
-            format_func=db_label
-        )
-        st.session_state.selected_db = choice["id"]
-        st.success(f"Selected DB: {st.session_state.selected_db}")
+    # Informational status only (no DB selector shown)
+    if st.session_state.selected_db:
+        st.success(f"Using Knowledge Base: {st.session_state.selected_db}")
+    else:
+        st.info("No knowledge base available yet. Ingest files to create one.")
 
 # ------------------ PHASE 2 ------------------
 with tab2:
     st.header("Generate Test Cases")
 
     if not st.session_state.selected_db:
-        st.warning("Please build or select a knowledge base in Phase 1.")
+        st.warning("Please build a knowledge base in Phase 1.")
     else:
         user_query = st.text_input("Describe what to test:", "Generate test cases for the discount code feature.")
 
