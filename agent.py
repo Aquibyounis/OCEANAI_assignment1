@@ -7,15 +7,36 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI 
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from dotenv import load_dotenv
+
+# 1. Load .env file immediately
+load_dotenv() 
 
 # --- CONFIGURATION ---
 CHROMA_PATH = "chroma_db"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 STORED_FILES_DIR = "stored_files"
 
-# Ensure API Key is set
-if "OPENROUTER_API_KEY" not in os.environ:
-    os.environ["OPENROUTER_API_KEY"] = "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" 
+# --- CRITICAL API SETUP (THE FIX) ---
+# We must get the OpenRouter key and FORCE it into the places LangChain looks.
+raw_key = os.getenv("OPENROUTER_API_KEY")
+
+if not raw_key:
+    # Fallback for debugging if .env fails
+    print("⚠️ WARNING: Using hardcoded key fallback")
+    raw_key = "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"
+
+# Clean the key
+OPENROUTER_API_KEY = raw_key.strip().strip('"').strip("'")
+
+# FORCE ENVIRONMENT VARIABLES
+# This tricks the OpenAI client into thinking it's talking to OpenAI, 
+# but sends the request to OpenRouter instead.
+os.environ["OPENAI_API_KEY"] = OPENROUTER_API_KEY
+os.environ["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
+os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
+
+print(f"✅ API Configured. Routing to: {os.environ['OPENAI_API_BASE']}")
 
 # --- HELPER: GET STORED HTML ---
 def get_stored_html_details():
@@ -59,11 +80,17 @@ def clean_python_code(ai_output):
 
 # --- HELPER: GET LLM ---
 def get_llm():
+    # Explicitly setting openai_api_base here ensures the override works
+    # even if environment variables are ignored by some library versions.
     return ChatOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
         model="meta-llama/llama-3.1-8b-instruct",
-        temperature=0
+        openai_api_key=os.environ["OPENROUTER_API_KEY"],
+        openai_api_base="https://openrouter.ai/api/v1",
+        temperature=0,
+        default_headers={
+            "HTTP-Referer": "http://localhost:8501", # Required by OpenRouter
+            "X-Title": "OceanAI Agent"               # Required by OpenRouter
+        }
     )
 
 # --- PHASE 2: GENERATE TEST CASES (RAW LIST FORMAT) ---
@@ -90,10 +117,14 @@ def generate_test_cases(query: str):
         
         INSTRUCTIONS:
         1. Analyze the requirements deeply.
-        2. Generate a comprehensive Test Plan.
+        2. Generate a comprehensive Test Plan for the provided HTML.
         3. **FORMAT:** Return a raw JSON LIST (Array of Objects).
-        4. **PATH FORMAT:** Use Forward Slashes (/) for all paths.
-        5. Study (test case + html data flow) strictly and based on that create test case flow.
+        4. **CRITICAL HTML ANALYSIS:**
+           - Look for `style="display: none;"` (like #cart-summary).
+           - IF a test involves the cart, discount, or checkout, YOU MUST generate a Step 1: "Add item to cart" to make the section visible.
+        5. **CSS RULES:** When defining steps or selectors, ALWAYS put a space between parent and child.
+           - Correct: "#cart .btn"
+           - Wrong: "#cart.btn" (This means ID=cart AND Class=btn on same element).
         
         OUTPUT SCHEMA (JSON List):
         [
@@ -102,9 +133,9 @@ def generate_test_cases(query: str):
                 "title": "Verify Discount Code",
                 "description": "Enter 'SAVE15' and check if price updates",
                 "preconditions": "Cart must have items",
-                "steps": "1. Add item\\n2. Enter Code\\n3. Click Apply",
+                "steps": "1. Add item to cart\\n2. Wait for cart summary\\n3. Enter Code\\n4. Click Apply",
                 "expected_result": "Total reduced by 15%",
-                "source_file": "specs.md"
+                "source_file": "checkout.html"
             }}
         ]
         """
@@ -134,33 +165,37 @@ def generate_selenium_script(selected_test_case: dict):
 
     llm = get_llm()
     
-    # --- STRICT STEP-BY-STEP PROMPT ---
-    system_template = """You are a Senior QA Automation Engineer in selenium code generator expert.
-    Act according to positive or negative test case.
-    write only code no text no extras, Refer to full html_code and then use it like map and understand the flow of data and results and intermediate steps.
-    YOUR GOAL: Generate a robust Python Selenium script that strictly follows the Test Case Steps.
-    check full code and understand it and then check test case and follow what needs to be done and how much needs to be done instead of going too far.
-    and based on test case flow check sequence one by one and predict what will happen in html code and implement it in selenium code and then move to next step in test case and then implement that and predict what will happen after that step  from html and then after steps predict output and check alerts clearly based on html code dont hallucinate just check what is there in html and understand it clearly.
-    CRITICAL RULES:
-    1. **Follow Steps Exactly:**
-       - If the steps are "Add Item -> Enter Code -> Click Apply", then DO NOT fill Name, Email, or Address.
-       - Only fill "Required Fields" if the test step explicitly says "Submit Form" or "Pay Now".
+    # --- STRICT STEP-BY-STEP PROMPT TAILORED FOR YOUR HTML ---
+    system_template = """You are a Senior QA Automation Engineer specializing in Python Selenium.
     
-    2. **Visibility Logic:**
-       - Before typing in an input, check if its parent is hidden. If hidden, click a trigger (like "Add to Cart").
+    YOUR GOAL: Generate a robust Python Selenium script that strictly follows the Test Case Steps and the provided HTML Structure.
     
-    3. **Safe Assertions (The Fix):**
-       - Use keywords from the 'Expected Result' for validation.
-       - Do NOT hardcode generic words like "error" or "success" unless they are in the Expected Result.
-       - **Correct Example:** If Expected="Invalid code", use `assert "Invalid" in alert_text`.
-       - **Wrong Example:** `assert "error" in alert_text` (This fails if the message is just "Invalid code").
-    4. Handle alerts and all and extract the data in html and check according to it
-    Use time.sleep(0.5) or time.sleep(1) based on work done in between lines to show user what is happening instead of rapidly doing all.
-    Study (test case + html data flow) and based on that create code flow.
+    CRITICAL HTML-SPECIFIC RULES (APPLY THESE TO EVERY SCRIPT):
+    1. **The "Hidden Cart" Logic:** - In this HTML, `#cart-summary` is HIDDEN (`display: none`) until an item is added.
+       - **RULE:** If the test requires entering a code or checking the total, you MUST click an "Add to Cart" button (e.g., `.product-card button`) first, then `WebDriverWait` for `visibility_of_element_located((By.ID, "cart-summary"))`.
+    
+    2. **The "Pay Now" Flow:**
+       - The form (`#checkout-form`) is visible, but submission requires items in the cart.
+       - **SEQUENCE:** Add Item -> Wait for Cart -> Apply Discount (if needed) -> Fill Form -> Click Pay Now.
+    
+    3. **CSS Grammar Fix (Mandatory):**
+       - **NEVER** output a selector like `#id.class` or `.class1.class2` (joined).
+       - **ALWAYS** insert a space: `#id .class` or `.class1 .class2` (descendant).
+       - Example Fix: Turn `#cart-summary.discount-group` into `#cart-summary .discount-group`.
+    
+    4. **Form Filling:**
+       - Use specific IDs found in the HTML: `#fullname`, `#email`, `#address`.
+       - Fill them with dummy data if the step implies "Fill form" or "Pay".
+       - Do NOT fill them if the test is just checking the empty cart state.
+    
+    5. **Alert Handling:**
+       - Discount codes (`OCEAN20`, `SAVE15`) trigger a browser alert.
+       - Use the `handle_alert` helper immediately after clicking "Apply".
+    
     STRICT OUTPUT RULES:
     1. Return the FULL Python script using the Skeleton below.
     2. No extra text or markdown.
-    3. Look out for alerts when ever necessary. Last time you skipped some alerts and mishandled codes
+    3. Use `time.sleep(1)` between major actions to ensure stability.
     """
 
     user_template = """
@@ -173,7 +208,7 @@ def generate_selenium_script(selected_test_case: dict):
     TARGET HTML FILE: {filename}
     TARGET HTML CONTENT:
     {html_code}
-    Include full skeleton not just run_test(): function
+    
     ------------------------------------------------
     GENERATE THE PYTHON SCRIPT USING THIS SKELETON:
     
@@ -212,7 +247,7 @@ def generate_selenium_script(selected_test_case: dict):
             WebDriverWait(driver, 3).until(EC.alert_is_present())
             alert = driver.switch_to.alert
             text = alert.text
-            print(f" Alert: '{{text}}'")
+            print(f"⚠️ Alert: '{{text}}'")
             alert.accept()
             return text
         except (TimeoutException, NoAlertPresentException):
@@ -226,20 +261,23 @@ def generate_selenium_script(selected_test_case: dict):
             time.sleep(2)
             
             # --- GENERATED LOGIC STARTS HERE ---
-            # [AI: 1. VISIBILITY CHECK (Cart/Form)]
-            # [AI: 2. EXECUTE ONLY THE STEPS LISTED IN THE TEST CASE]
-            # [AI: 3. HANDLE ALERTS: alert_text = handle_alert(driver)]
-            # [AI: 4. ASSERTION: Compare alert_text with keywords from '{expected_result}']
+            # [AI: 1. SETUP & PAGE LOAD]
+            # [AI: 2. ADD ITEM TO CART (TRIGGER VISIBILITY)]
+            # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
+            # [AI: 4. APPLY DISCOUNT (If in steps)]
+            # [AI: 5. FILL FORM (#fullname, #email, #address)]
+            # [AI: 6. CLICK PAY (If in steps)]
+            # [AI: 7. ASSERTIONS]
             # --- GENERATED LOGIC ENDS HERE ---
             
-            print("Test Completed Successfully")
+            print("Test Completed ")
             
         except AssertionError as e:
             print(f"Assertion: {{e}}")
         except Exception as e:
-            print(f"Tested: {{e}}")
+            print(f"Test: {{e}}")
         finally:
-            print("✅ Testing done")
+            print("Test completed. Cleaning up...")
             print("⏳ Closing browser...")
             time.sleep(3)
             driver.quit()
