@@ -96,52 +96,6 @@ def clean_python_code(ai_output):
         code = code[code.find("import os"):]
     return code.strip()
 
-def extract_selectors(html_content):
-    ids = re.findall(r'id="([^"]+)"', html_content)
-    classes = re.findall(r'class="([^"]+)"', html_content)
-
-    # Flatten class list (split multi-class entries)
-    class_list = []
-    for c in classes:
-        class_list.extend(c.split())
-
-    buttons = re.findall(r'<button[^>]*>', html_content)
-    inputs = re.findall(r'<input[^>]*>', html_content)
-    textareas = re.findall(r'<textarea[^>]*>', html_content)
-
-    selector_doc = []
-
-    # Add IDs
-    for i in ids:
-        selector_doc.append(f"ID: #{i}")
-
-    # Add classes
-    for c in class_list:
-        selector_doc.append(f"CLASS: .{c}")
-
-    # Add buttons with context
-    for btn in buttons:
-        if 'class="' in btn:
-            cls = re.findall(r'class="([^"]+)"', btn)[0].split()[0]
-            selector_doc.append(f"BUTTON: .{cls} button")
-        else:
-            selector_doc.append("BUTTON: <button> (no class)")
-
-    # Add inputs
-    for inp in inputs:
-        id_match = re.findall(r'id="([^"]+)"', inp)
-        if id_match:
-            selector_doc.append(f"INPUT: #{id_match[0]}")
-
-    # Add textareas
-    for ta in textareas:
-        id_match = re.findall(r'id="([^"]+)"', ta)
-        if id_match:
-            selector_doc.append(f"TEXTAREA: #{id_match[0]}")
-
-    return "\n".join(selector_doc)
-
-
 def generate_test_cases(db_id, query):
     try:
         db = load_chroma(db_id)
@@ -193,8 +147,6 @@ def generate_test_cases(db_id, query):
 
 def generate_selenium_script(db_id, selected_test_case):
     html_path, html_filename, html_content = get_stored_html_details()
-    selector_map = extract_selectors(html_content)
-
     if not html_content:
         return "# No HTML found."
 
@@ -208,136 +160,52 @@ def generate_selenium_script(db_id, selected_test_case):
 
     llm = get_llm()
     system_template = """
-You are a Senior QA Automation Engineer who generates Selenium Python scripts that EXACTLY match the real HTML structure provided.
+You are a Senior QA Automation Engineer who is expert in creating selenium codes for replacing senior automation software tester.
+Refer to html code + test case and based on both use selectors and understand the data flow and create selenium script in python which is 100% accurate with html code.
+generate only code no extra explaination no extra texts. just code with template of code.
 
-You must read:
-1. The TEST CASE (steps + expected behavior)
-2. The FULL HTML CODE
-3. The EXACT list of VALID SELECTORS extracted from that HTML:  
-{selector_map}
+STRICT RULES (MANDATORY — DO NOT BREAK):
+1. You MUST NOT invent selectors.
+2. You MUST ONLY use IDs, classes, and structures found inside the provided HTML code.
+3. Before generating any step, SCAN the HTML and list the EXACT selectors available:
+   - Valid IDs
+   - Valid classes
+   - Valid tag structures
+4. If a selector from the test steps does not exist in the HTML, FIX the selector to the closest valid match.
+5. You MUST NOT produce selectors like '#id.class' or '.class1.class2'.
+6. You MUST NOT add classes that do not exist in the HTML.
+7. You MUST NOT shorten or expand selector names.
+8. If a required element does not exist in HTML, you MUST stop and return an error message explaining what is missing.
 
-Your job is to:
-- Understand the DOM structure
-- Understand the user flow and HTML flow sequence
-- Map test steps to real HTML elements
-- Generate a PERFECT, working Selenium script
-- NO hallucinations, NO missing steps, NO altered selectors
-- Generate only code no extra steps or talks or extra information.
-===============================================================
-🔥 STRICT NON-NEGOTIABLE RULES (DO NOT BREAK THESE)
-===============================================================
+EXTRACTED SELECTORS FROM HTML:
+- Cart summary: #cart-summary
+- Discount input: #discount-code
+- Discount apply button: button inside .discount-group
+- Product card button: .product-card button
+- Subtotal: #subtotal
+- Discount amount: #discount-amount
+- Shipping cost: #shipping-cost
+- Total: #total-price
+- Form: #checkout-form
+- Inputs: #fullname, #email, #address
+- Pay now: #checkout-form .pay-btn
 
-1. **You MUST NOT invent selectors. EVER.**
-   You may ONLY use selectors listed in `{selector_map}`.
-   If a required selector is NOT in this list:
-     → STOP and return an error message.
+ALLOWED SELECTOR FORMAT:
+- By.ID("id_here")
+- By.CLASS_NAME("class_here")
+- By.CSS_SELECTOR("parent child")
+- By.CSS_SELECTOR(".class button")
+- By.CSS_SELECTOR("#id .child")
+(NEVER join ID + class in one token.)
 
-2. **If a test step uses a selector not found in HTML:**
-   - DO NOT guess.
-   - DO NOT create.
-   - FIX it to the closest REAL selector from `{selector_map}` ONLY IF that selector represents the same element.
-   - If no match exists → STOP and output an error.
+HTML HIDDEN LOGIC RULE:
+- #cart-summary is hidden until an item is added.
+- So for ANY test involving discounts or totals:
+  Step 1 MUST be: click ".product-card button"
 
-3. **Selector Format Rules (MANDATORY):**
-   - Valid:
-       By.ID("id_here")
-       By.CLASS_NAME("class_here")
-       By.CSS_SELECTOR("parent child")
-       By.CSS_SELECTOR(".class button")
-       By.CSS_SELECTOR("#id .child")
-   - INVALID (never output):
-       "#id.class"
-       ".class1.class2"
-       Any selector not found in {selector_map}
-
-4. **You must understand the HTML flow from the code:**
-   - `.product-card button` adds an item to the cart.
-   - `#cart-summary` is HIDDEN until an item is added.
-   - Discount area exists INSIDE the hidden cart.
-   - Form exists on the right column.
-   - Shipping radio options exist with updateShipping().
-   - “Pay Now” submits the checkout.
-
-5. **HTML HIDDEN LOGIC RULE (CRITICAL):**
-   #cart-summary is hidden until at least ONE product is added.
-   Therefore, ANY test involving:
-       - discount application
-       - subtotal
-       - total price
-       - shipping cost
-       - checkout form submission
-   MUST begin with:
-       click first ".product-card button"
-       wait until "#cart-summary" becomes visible
-
-6. **Flow Control Requirements:**
-   - You MUST wait for elements properly using WebDriverWait.
-   - You MUST fill form fields ONLY if test case requires submission.
-   - You MUST NOT add steps that test case does not require.
-   - You MUST execute steps in STRICT chronological order from the test case.
-
-7. **Stability Rules:**
-   - Add `time.sleep(1)` between high-level actions.
-   - Use CSS selectors EXACTLY as provided.
-   - Never shorten or rename IDs/classes.
-
-8. **MANDATORY JAVASCRIPT ALERT HANDLING (CRITICAL RULE):**
-   The provided HTML triggers alerts in these situations:
-     - Applying “OCEAN20”
-     - Applying “SAVE15”
-     - Applying any invalid discount code
-     - Submitting the form with an empty cart
-
-   Therefore you MUST:
-     - ALWAYS call `handle_alert(driver)` immediately AFTER clicking `.discount-group button`
-     - NEVER perform Selenium clicks or typing while an alert is open
-     - Detect and dismiss alerts using the provided handler
-     - If alert appears unexpectedly → STOP and raise:
-           ERROR: Unexpected alert — test flow blocked.
-     - After ANY step that triggers alerts, always call:
-           handle_alert(driver)
-           time.sleep(1)
-
-===============================================================
-🔥 VALID SELECTORS FROM ACTUAL HTML (DO NOT USE ANYTHING OUTSIDE THIS)
-===============================================================
-{selector_map}
-
-===============================================================
-🔥 KNOWN SEMANTIC ROLE OF IMPORTANT SELECTORS (DO NOT MISINTERPRET)
-===============================================================
-- ".product-card button" → Adds product to cart (triggers visibility of #cart-summary)
-- "#cart-summary" → Hidden cart container, visible after adding a product
-- "#discount-code" → User enters discount code here
-- ".discount-group button" → Apply Discount button
-- "#subtotal" → Displays subtotal BEFORE discount
-- "#discount-amount" → Displays discounted amount
-- "#shipping-cost" → Displays shipping
-- "#total-price" → Displays final computed price
-- "#checkout-form" → Checkout form wrapper
-- "#fullname", "#email", "#address" → Form input fields
-- ".pay-btn" → Final submission button inside checkout-form
-
-===============================================================
-🔥 OUTPUT FORMAT RULES (NO EXCEPTIONS)
-===============================================================
-- Output **ONLY** the full Python script
-- No explanation
-- No markdown (NO ```python)
-- The script MUST strictly follow the template provided in the user message
-- The block “# --- GENERATED LOGIC STARTS HERE ---” must contain ONLY working Selenium actions
-
-If any required HTML element **does not exist** according to selector_map → output:
-
-    ERROR: Missing required HTML element "<selector_name>"
-
-No further output.
-
-===============================================================
-END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
-===============================================================
-
-"""
+OUTPUT REQUIREMENTS:
+- Return ONLY the final Python script.
+- No markdown, no explanation."""
 
 
     user_template = """
@@ -442,8 +310,7 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
             "steps": selected_test_case.get("steps"),
             "expected_result": selected_test_case.get("expected_result"),
             "html_code": html_content,
-            "filename": html_filename,
-            "selector_map": selector_map
+            "filename": html_filename
         })
         return clean_python_code(raw)
     except Exception as e:
