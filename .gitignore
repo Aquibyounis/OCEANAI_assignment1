@@ -1,6 +1,7 @@
-__Pycache__/
+__pycache__/
 .env
-venv
-.venv
+venv/
+.venv/
 chroma_db/
-databases
+databases/
+*.log
