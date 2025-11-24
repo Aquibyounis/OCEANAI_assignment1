@@ -42,47 +42,31 @@ def handle_alert(driver):
 def run_test():
     driver = setup_driver()
     try:
-        print(f"🚀 Starting Test: TC004")
+        print(f"🚀 Starting Test: TC001")
         driver.get(get_html_path())
         time.sleep(2)
         
         # --- GENERATED LOGIC STARTS HERE ---
         # [AI: 1. SETUP & PAGE LOAD]
         # [AI: 2. ADD ITEM TO CART (TRIGGER VISIBILITY)]
-        # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
-        # [AI: 4. APPLY DISCOUNT (If in steps)]
-        # [AI: 5. FILL FORM (#fullname, #email, #address)]
-        # [AI: 6. CLICK PAY (If in steps)]
-        # [AI: 7. ASSERTIONS]
-        # --- GENERATED LOGIC ENDS HERE ---
-        
-        # [AI: 1. SETUP & PAGE LOAD]
-        # [AI: 2. ADD ITEM TO CART (TRIGGER VISIBILITY)]
         driver.find_element(By.CSS_SELECTOR, ".product-card button").click()
         time.sleep(1)
-        
         # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
         WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "cart-summary")))
-        
         # [AI: 4. APPLY DISCOUNT (If in steps)]
-        driver.find_element(By.ID, "discount-code").send_keys("OCEAN20")
+        driver.find_element(By.ID, "discount-code").send_keys("SAVE15")
         driver.find_element(By.CSS_SELECTOR, ".discount-group button").click()
         handle_alert(driver)
         time.sleep(1)
-        
         # [AI: 5. FILL FORM (#fullname, #email, #address)]
         driver.find_element(By.ID, "fullname").send_keys("John Doe")
-        driver.find_element(By.ID, "email").send_keys("john@example.com")
+        driver.find_element(By.ID, "email").send_keys("johndoe@example.com")
         driver.find_element(By.ID, "address").send_keys("123 Main St")
-        
         # [AI: 6. CLICK PAY (If in steps)]
         driver.find_element(By.CSS_SELECTOR, ".pay-btn").click()
         handle_alert(driver)
         time.sleep(1)
-        
-        # [AI: 7. ASSERTIONS]
-        error_msg = driver.find_element(By.ID, "email").get_attribute("validationMessage")
-        assert error_msg == "Please enter a valid email address."
+        # --- GENERATED LOGIC ENDS HERE ---
         
         print("Test Completed ")
         

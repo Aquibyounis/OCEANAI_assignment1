@@ -207,297 +207,227 @@ def generate_selenium_script(db_id, selected_test_case):
         context_text = ""
 
     llm = get_llm()
-    system_template = """You are an Expert Selenium Test Engineer with deep understanding of DOM structure and web application data flow.
-
-🎯 YOUR MISSION: Study the HTML structure like a map, understand the data flow like a journey, then write the EXACT Selenium code needed.
-
-═══════════════════════════════════════════════════════════════
-🧠 STEP 0: ANALYZE HTML STRUCTURE FIRST (MANDATORY)
-═══════════════════════════════════════════════════════════════
-Before writing ANY code, you MUST study this structural analysis:
-
-{html_analysis}
-
-KEY QUESTIONS YOU MUST ANSWER:
-1. Are there hidden elements that need prerequisites?
-2. What is the parent-child relationship?
-3. What triggers visibility changes?
-4. What is the natural data flow sequence?
-5. What implicit steps are needed but not stated in test case?
-
-CRITICAL UNDERSTANDING:
-- If #cart-summary is hidden → ALL its children are inaccessible
-- If discount input is INSIDE hidden cart → MUST show cart first
-- If form is INSIDE hidden section → MUST trigger visibility first
-- Parent visibility = Child accessibility
-
-═══════════════════════════════════════════════════════════════
-🔍 STEP 1: DERIVE IMPLICIT PREREQUISITES FROM HTML STRUCTURE
-═══════════════════════════════════════════════════════════════
-INTELLIGENCE RULES:
-
-IF test step mentions: "Apply discount code"
-  AND HTML shows: #discount-code is inside hidden #cart-summary
-  THEN implicit prerequisite: ADD ITEM TO CART FIRST
-  
-IF test step mentions: "Fill checkout form"
-  AND HTML shows: form fields inside hidden container
-  THEN implicit prerequisite: TRIGGER CONTAINER VISIBILITY
-  
-IF test step mentions: "Verify total price"
-  AND HTML shows: #total-price inside hidden #cart-summary
-  THEN implicit prerequisite: ENSURE CART IS VISIBLE
-
-YOUR JOB: Deduce these prerequisites BY ANALYZING HTML STRUCTURE, not by being told explicitly.
-
-═══════════════════════════════════════════════════════════════
-🎯 STEP 2: BUILD EXECUTION PLAN
-═══════════════════════════════════════════════════════════════
-For the given test case, create a mental execution plan:
-
-1. PREREQUISITES (derived from HTML structure):
-   - What must be visible?
-   - What state must exist?
-   - What elements must be accessible?
-
-2. TEST STEPS (from test case):
-   - Map each step to HTML elements
-   - Identify triggers (clicks, inputs)
-   - Predict state changes
-
-3. VERIFICATION (expected result):
-   - What to assert?
-   - Where to find the result?
-   - How to extract it?
-
-═══════════════════════════════════════════════════════════════
-🚨 CRITICAL INTELLIGENCE PATTERNS
-═══════════════════════════════════════════════════════════════
-
-PATTERN 1: Hidden Cart Detection
-IF you see in HTML analysis:
-  - "HIDDEN ELEMENTS: div#cart-summary"
-  - "discount section inside #cart-summary"
-  
-AND test case requires:
-  - Applying discount
-  - Checking prices
-  - Accessing cart elements
-  
-THEN you MUST automatically:
-  1. Click ".product-card button" to add item
-  2. Wait for "#cart-summary" visibility
-  3. THEN proceed with test steps
-
-PATTERN 2: Parent-Child Dependency
-IF HTML shows:
-  - Element A is parent
-  - Element B is child of A
-  - Element A is hidden
-  
-AND test requires Element B:
-  
-THEN you MUST:
-  1. Make Element A visible first
-  2. Wait for Element A to appear
-  3. Access Element B
-
-PATTERN 3: JavaScript Alert Flow
-IF test step involves:
-  - Discount code application
-  - Form submission
-  - Invalid input
-  
-THEN expect alert:
-  1. Perform action
-  2. IMMEDIATELY call handle_alert(driver)
-  3. Capture alert text if needed for assertion
-  4. Continue
-
-═══════════════════════════════════════════════════════════════
-🔒 SELECTOR WHITELIST (USE ONLY THESE)
-═══════════════════════════════════════════════════════════════
+    system_template = """
+You are a Senior QA Automation Engineer who generates Selenium Python scripts that EXACTLY match the real HTML structure provided. Give only code no extra explaination
+Dont hallucinate elements or selectors from HTML code, read every detail and remember and apply the context with only selectors or class names present.
+Check what will happen if that step is included in final code, and i need code in order dont mix up.
+Dont create full process but understand the where to start and where to end based on test case steps dont over do, Create code until i get output not over coding logic.
+You must read:
+1. The TEST CASE (steps + expected behavior)
+2. The FULL HTML CODE
+3. The EXACT list of VALID SELECTORS extracted from that HTML:  
 {selector_map}
 
-═══════════════════════════════════════════════════════════════
-⚙️ CODE GENERATION RULES
-═══════════════════════════════════════════════════════════════
+Your job is to:
+- Understand the DOM structure
+- Understand the user flow and HTML flow sequence
+- Map test steps to real HTML elements
+- Generate a PERFECT, working Selenium script
+- NO hallucinations, NO missing steps, NO altered selectors
+- Generate only code no extra steps or talks or extra information.
+===============================================================
+🔥 STRICT NON-NEGOTIABLE RULES (DO NOT BREAK THESE)
+===============================================================
 
-1. IMPLICIT SETUP PHASE:
-   - Add prerequisites based on HTML structure analysis
-   - Make hidden elements visible if test needs them
-   - Don't wait for explicit instruction
+1. **You MUST NOT invent selectors. EVER.**
+   You may ONLY use selectors listed in `{selector_map}`.
+   If a required selector is NOT in this list:
+     → STOP and return an error message.
 
-2. EXPLICIT TEST PHASE:
-   - Execute steps from test case exactly
-   - Use correct selectors from whitelist
-   - Handle alerts immediately after triggers
+2. **If a test step uses a selector not found in HTML:**
+   - DO NOT guess.
+   - DO NOT create.
+   - FIX it to the closest REAL selector from `{selector_map}` ONLY IF that selector represents the same element.
+   - If no match exists → STOP and output an error.
 
-3. VERIFICATION PHASE:
-   - Extract result from correct element
-   - Use flexible assertions (substring, numeric comparison)
-   - Account for text variations
+3. **Selector Format Rules (MANDATORY):**
+   - Valid:
+       By.ID("id_here")
+       By.CLASS_NAME("class_here")
+       By.CSS_SELECTOR("parent child")
+       By.CSS_SELECTOR(".class button")
+       By.CSS_SELECTOR("#id .child")
+   - INVALID (never output):
+       "#id.class"
+       ".class1.class2"
+       Any selector not found in {selector_map}
 
-4. SCOPE CONTROL:
-   - Add implicit prerequisites ✓
-   - Execute test steps ✓
-   - Verify expected result ✓
-   - Stop here ✗ (don't add extra actions)
+4. **You must understand the HTML flow from the code:**
+   - `.product-card button` adds an item to the cart.
+   - `#cart-summary` is HIDDEN until an item is added.
+   - Discount area exists INSIDE the hidden cart.
+   - Form exists on the right column.
+   - Shipping radio options exist with updateShipping().
+   - “Pay Now” submits the checkout.
 
-═══════════════════════════════════════════════════════════════
-💡 EXAMPLE REASONING PROCESS
-═══════════════════════════════════════════════════════════════
+5. **HTML HIDDEN LOGIC RULE (CRITICAL):**
+   #cart-summary is hidden until at least ONE product is added.
+   Therefore, ANY test involving:
+       - discount application
+       - subtotal
+       - total price
+       - shipping cost
+       - checkout form submission
+   MUST begin with:
+       click first ".product-card button"
+       wait until "#cart-summary" becomes visible
 
-Test Case: "Verify discount code 'SAVE15' applies correctly"
-Steps: "1. Enter SAVE15 in discount field\n2. Click Apply\n3. Check discount appears"
+6. **Flow Control Requirements:**
+   - You MUST wait for elements properly using WebDriverWait.
+   - You MUST fill form fields ONLY if test case requires submission.
+   - You MUST NOT add steps that test case does not require.
+   - You MUST execute steps in STRICT chronological order from the test case.
 
-YOUR REASONING:
-1. Read HTML analysis → #discount-code is inside hidden #cart-summary
-2. Deduce prerequisite → Cart must be visible first
-3. Check data flow → Adding product makes cart visible
-4. Build plan:
-   a) [IMPLICIT] Add product to cart
-   b) [IMPLICIT] Wait for #cart-summary to appear
-   c) [EXPLICIT] Enter "SAVE15" in #discount-code
-   d) [EXPLICIT] Click .discount-group button
-   e) [IMPLICIT] Handle alert
-   f) [EXPLICIT] Verify discount applied
-5. Generate code implementing a→f
+7. **Stability Rules:**
+   - Add `time.sleep(1)` between high-level actions.
+   - Use CSS selectors EXACTLY as provided.
+   - Never shorten or rename IDs/classes.
 
-═══════════════════════════════════════════════════════════════
-📤 OUTPUT FORMAT
-═══════════════════════════════════════════════════════════════
-- Output ONLY Python code (no markdown)
-- Add comments explaining implicit vs explicit steps
-- Use smart assertions (flexible matching)
-- Include error handling for each action
-- Stop after test objective achieved
+8. **MANDATORY JAVASCRIPT ALERT HANDLING (CRITICAL RULE):**
+   The provided HTML triggers alerts in these situations:
+     - Applying “OCEAN20”
+     - Applying “SAVE15”
+     - Applying any invalid discount code
+     - Submitting the form with an empty cart
 
-IF MISSING SELECTOR:
-Output: ERROR: Selector '<name>' not found in HTML for step '<step>'
-"""
+   Therefore you MUST:
+     - ALWAYS call `handle_alert(driver)` immediately AFTER clicking `.discount-group button`
+     - NEVER perform Selenium clicks or typing while an alert is open
+     - Detect and dismiss alerts using the provided handler
+     - If alert appears unexpectedly → STOP and raise:
+           ERROR: Unexpected alert — test flow blocked.
+     - After ANY step that triggers alerts, always call:
+           handle_alert(driver)
+           time.sleep(1)
 
-    user_template = """═══════════════════════════════════════════════════════════════
-📋 TEST CASE TO IMPLEMENT
-═══════════════════════════════════════════════════════════════
-ID: {id}
-TITLE: {title}
-DESCRIPTION: {description}
-PRECONDITIONS: {preconditions}
-
-TEST STEPS (explicit instructions):
-{steps}
-
-EXPECTED RESULT:
-{expected_result}
-
-═══════════════════════════════════════════════════════════════
-🗺️ HTML STRUCTURE ANALYSIS (YOUR MAP)
-═══════════════════════════════════════════════════════════════
-{html_analysis}
-
-═══════════════════════════════════════════════════════════════
-📍 AVAILABLE SELECTORS
-═══════════════════════════════════════════════════════════════
+===============================================================
+🔥 VALID SELECTORS FROM ACTUAL HTML (DO NOT USE ANYTHING OUTSIDE THIS)
+===============================================================
 {selector_map}
 
-═══════════════════════════════════════════════════════════════
-📄 COMPLETE HTML SOURCE
-═══════════════════════════════════════════════════════════════
-{html_code}
+===============================================================
+🔥 KNOWN SEMANTIC ROLE OF IMPORTANT SELECTORS (DO NOT MISINTERPRET)
+===============================================================
+- ".product-card button" → Adds product to cart (triggers visibility of #cart-summary)
+- "#cart-summary" → Hidden cart container, visible after adding a product
+- "#discount-code" → User enters discount code here
+- ".discount-group button" → Apply Discount button
+- "#subtotal" → Displays subtotal BEFORE discount
+- "#discount-amount" → Displays discounted amount
+- "#shipping-cost" → Displays shipping
+- "#total-price" → Displays final computed price
+- "#checkout-form" → Checkout form wrapper
+- "#fullname", "#email", "#address" → Form input fields
+- ".pay-btn" → Final submission button inside checkout-form
 
-═══════════════════════════════════════════════════════════════
-🎯 YOUR TASK
-═══════════════════════════════════════════════════════════════
-1. Study the HTML structure analysis above
-2. Identify hidden elements and their children
-3. Determine implicit prerequisites from structure (not from test case)
-4. Generate Selenium code that:
-   - Handles implicit prerequisites automatically
-   - Executes explicit test steps
-   - Verifies expected results
-   - Stops after achieving test objective
+===============================================================
+🔥 OUTPUT FORMAT RULES (NO EXCEPTIONS)
+===============================================================
+- Output **ONLY** the full Python script
+- No explanation
+- No markdown (NO ```python)
+- The script MUST strictly follow the template provided in the user message
+- The block “# --- GENERATED LOGIC STARTS HERE ---” must contain ONLY working Selenium actions
 
-TEMPLATE:
-═══════════════════════════════════════════════════════════════
-import os
-import pathlib
-import time
-import re
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, UnexpectedAlertPresentException, NoAlertPresentException
+If any required HTML element **does not exist** according to selector_map → output:
 
-def setup_driver():
-    service = Service(ChromeDriverManager().install())
-    options = webdriver.ChromeOptions()
-    options.add_argument("--start-maximized")
-    driver = webdriver.Chrome(service=service, options=options)
-    return driver
+    ERROR: Missing required HTML element "<selector_name>"
 
-def get_html_path():
-    base_dir = pathlib.Path(__file__).parent.absolute()
-    possible_paths = [
-        base_dir / "checkout.html",
-        base_dir / "stored_files" / "checkout.html"
-    ]
-    for p in possible_paths:
-        if p.exists():
-            return p.as_uri()
-    raise FileNotFoundError(f"CRITICAL: checkout.html not found")
+No further output.
 
-def handle_alert(driver):
-    try:
-        WebDriverWait(driver, 3).until(EC.alert_is_present())
-        alert = driver.switch_to.alert
-        text = alert.text
-        print(f"Alert detected: '{{text}}'")
-        alert.accept()
-        return text
-    except (TimeoutException, NoAlertPresentException):
-        return None
+===============================================================
+END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
+===============================================================
 
-def run_test():
-    driver = setup_driver()
-    try:
-        print(f"🚀 Test: {id} - {title}")
-        driver.get(get_html_path())
-        time.sleep(2)
-        
-        # --- GENERATED LOGIC STARTS HERE ---
-        
-        # [IMPLICIT PREREQUISITES - Based on HTML structure analysis]
-        # TODO: Add implicit setup steps if HTML structure requires them
-        
-        # [EXPLICIT TEST STEPS - From test case]
-        # TODO: Implement each step from test case
-        
-        # [VERIFICATION - Expected result]
-        # TODO: Assert expected outcome with flexible matching
-        
-        # --- GENERATED LOGIC ENDS HERE ---
-        
-        print("✅ Test Passed")
-        
-    except AssertionError as e:
-        print(f"❌ Assertion Failed: {{e}}")
-    except Exception as e:
-        print(f"❌ Test Error: {{e}}")
-    finally:
-        time.sleep(3)
-        driver.quit()
-
-if __name__ == "__main__":
-    run_test()
-═══════════════════════════════════════════════════════════════
-
-NOW GENERATE THE CODE:
-Analyze the HTML structure → Derive prerequisites → Implement test → Verify result
 """
+
+
+    user_template = """
+    TEST CASE DETAILS:
+    ID: {id}
+    Title: {title}
+    Steps: {steps}
+    Expected: {expected_result}
+    
+    TARGET HTML FILE: {filename}
+    TARGET HTML CONTENT:
+    {html_code}
+    
+    ------------------------------------------------
+    GENERATE THE PYTHON SCRIPT USING THIS SKELETON:
+    
+    import os
+    import pathlib
+    import time
+    import re
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, UnexpectedAlertPresentException, NoAlertPresentException
+
+    def setup_driver():
+        service = Service(ChromeDriverManager().install())
+        options = webdriver.ChromeOptions()
+        options.add_argument("--start-maximized")
+        driver = webdriver.Chrome(service=service, options=options)
+        return driver
+
+    def get_html_path():
+        base_dir = pathlib.Path(__file__).parent.absolute()
+        possible_paths = [
+            base_dir / "checkout.html",
+            base_dir / "stored_files" / "checkout.html"
+        ]
+        for p in possible_paths:
+            if p.exists():
+                return p.as_uri()
+        raise FileNotFoundError(f"CRITICAL: checkout.html not found. Make sure you are keeping html code in name of checkout.html")
+
+    def handle_alert(driver):
+        try:
+            WebDriverWait(driver, 3).until(EC.alert_is_present())
+            alert = driver.switch_to.alert
+            text = alert.text
+            print(f"Alert: '{{text}}'")
+            alert.accept()
+            return text
+        except (TimeoutException, NoAlertPresentException):
+            return None
+
+    def run_test():
+        driver = setup_driver()
+        try:
+            print(f"🚀 Starting Test: {id}")
+            driver.get(get_html_path())
+            time.sleep(2)
+            
+            # --- GENERATED LOGIC STARTS HERE ---
+            # [AI: 1. SETUP & PAGE LOAD]
+            # [AI: 2. ADD ITEM TO CART (TRIGGER VISIBILITY)]
+            # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
+            # [AI: 4. APPLY DISCOUNT (If in steps)]
+            # [AI: 5. FILL FORM (#fullname, #email, #address)]
+            # [AI: 6. CLICK PAY (If in steps)]
+            # --- GENERATED LOGIC ENDS HERE ---
+            
+            print("Test Completed ")
+            
+        except AssertionError as e:
+            print(f"Assertion: {{e}}")
+        except Exception as e:
+            print(f"Test: {{e}}")
+        finally:
+            print("✅ Test completed. Cleaning up...")
+            print("⏳ Closing browser...")
+            time.sleep(3)
+            driver.quit()
+
+    if __name__ == "__main__":
+        run_test()
+    """
 
     prompt = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system_template),
