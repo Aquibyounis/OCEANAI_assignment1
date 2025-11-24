@@ -1,13 +1,3 @@
-import os
-import json
-import re
-import glob
-from dotenv import load_dotenv
-
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import ChatOpenAI
-
 from langchain_core.prompts import (
     ChatPromptTemplate,
     SystemMessagePromptTemplate,
@@ -15,228 +5,13 @@ from langchain_core.prompts import (
 )
 from langchain_core.output_parsers import StrOutputParser
 
-load_dotenv()
-
-if not os.getenv("OPENROUTER_API_KEY"):
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    if os.path.exists(env_path):
-        load_dotenv(env_path)
-
-raw_key = os.getenv("OPENROUTER_API_KEY")
-
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-STORED_FILES_DIR = "stored_files"
-PROJECTS_INDEX = os.path.join("databases", "projects.json")
-
-if raw_key:
-    OPENROUTER_API_KEY = raw_key.strip().strip('"').strip("'")
-    os.environ["OPENAI_API_KEY"] = OPENROUTER_API_KEY
-    os.environ["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
-    os.environ["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
-    os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
-
-embedding_function = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-
-def load_db_info(db_id):
-    with open(PROJECTS_INDEX, "r", encoding="utf-8") as f:
-        index = json.load(f)
-    return index.get(db_id)
-
-def load_chroma(db_id):
-    info = load_db_info(db_id)
-    persist_dir = info["persist_dir"]
-    return Chroma(persist_directory=persist_dir, embedding_function=embedding_function)
-
-def get_llm():
-    return ChatOpenAI(
-        model="meta-llama/llama-3.1-8b-instruct",
-        openai_api_key=os.environ["OPENROUTER_API_KEY"],
-        openai_api_base="https://openrouter.ai/api/v1",
-        temperature=0,
-        default_headers={
-            "HTTP-Referer": "http://localhost:8501",
-            "X-Title": "OceanAI Agent"
-        }
-    )
-
-def get_stored_html_details():
-    if not os.path.exists(STORED_FILES_DIR):
-        return None, None, None
-    files = glob.glob(os.path.join(STORED_FILES_DIR, "*.html"))
-    if not files:
-        return None, None, None
-    full_path = files[0]
-    filename = os.path.basename(full_path)
-    try:
-        with open(full_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return full_path, filename, content
-    except:
-        return None, None, None
-
-def clean_and_parse_json(ai_output):
-    try:
-        text = ai_output.replace("```json", "").replace("```", "")
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start == -1:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-        if start == -1 or end == 0:
-            return {"error": "No JSON found"}
-        json_str = text[start:end]
-        json_str = re.sub(r'\\(?![\\/\"bfnrtu])', '/', json_str)
-        return json.loads(json_str)
-    except:
-        return {"error": "JSON parse error", "raw": ai_output}
-
-def clean_python_code(ai_output):
-    code = ai_output.replace("```python", "").replace("```", "")
-    if "import os" in code:
-        code = code[code.find("import os"):]
-    return code.strip()
-
-def extract_selectors(html_content):
-    ids = re.findall(r'id="([^"]+)"', html_content)
-    classes = re.findall(r'class="([^"]+)"', html_content)
-
-    # Flatten class list (split multi-class entries)
-    class_list = []
-    for c in classes:
-        class_list.extend(c.split())
-
-    buttons = re.findall(r'<button[^>]*>', html_content)
-    inputs = re.findall(r'<input[^>]*>', html_content)
-    textareas = re.findall(r'<textarea[^>]*>', html_content)
-
-    selector_doc = []
-
-    # Add IDs
-    for i in ids:
-        selector_doc.append(f"ID: #{i}")
-
-    # Add classes
-    for c in class_list:
-        selector_doc.append(f"CLASS: .{c}")
-
-    # Add buttons with context
-    for btn in buttons:
-        if 'class="' in btn:
-            cls = re.findall(r'class="([^"]+)"', btn)[0].split()[0]
-            selector_doc.append(f"BUTTON: .{cls} button")
-        else:
-            selector_doc.append("BUTTON: <button> (no class)")
-
-    # Add inputs
-    for inp in inputs:
-        id_match = re.findall(r'id="([^"]+)"', inp)
-        if id_match:
-            selector_doc.append(f"INPUT: #{id_match[0]}")
-
-    # Add textareas
-    for ta in textareas:
-        id_match = re.findall(r'id="([^"]+)"', ta)
-        if id_match:
-            selector_doc.append(f"TEXTAREA: #{id_match[0]}")
-
-    return "\n".join(selector_doc)
-
-
-def generate_test_cases(db_id, query):
-    try:
-        db = load_chroma(db_id)
-    except:
-        return {"error": "DB not found"}
-
-    results = db.similarity_search(query, k=6)
-    context_text = "\n\n".join([
-        f"Source: {doc.metadata.get('source', 'Unknown')}\nContent: {doc.page_content}" 
-        for doc in results
-    ])
-
-    llm = get_llm()
-    prompt = ChatPromptTemplate.from_template(
-        """
-You are a Senior QA Lead.
-CONTEXT: {context}
-REQUEST: {query}
-
-INSTRUCTIONS:
-1. Analyze the HTML deeply.
-2. Generate ONLY test cases that can be executed using the given HTML structure.
-3. DO NOT include any steps that involve:
-   - filling checkout form
-   - clicking Pay
-   - submitting checkout
-   unless the user explicitly requests a checkout test.
-4. Steps should reflect ONLY elements visible in HTML.
-5. Steps MUST NOT go beyond the test case goal.
-6. Always consider visibility flow:
-   - cart-summary is hidden until item added
-   - discount section is inside cart-summary
-7. FORMAT RULE: Output only RAW JSON ARRAY.
-8. Each object MUST contain:
-   - id
-   - title
-   - description
-   - preconditions
-   - steps (ARRAY OF STRINGS, not one string)
-   - expected_result
-   - source_file
-9. Generate steps inside based on intent of title, Strictly based on TITLE
-10. Tell if there will be any alerts inside the steps too like when something trigger alert or message then what to do strictly based on existing html.
-
-OUTPUT FORMAT EXAMPLE (USE THIS EXACT NEWLINE STYLE):
-
-[
-  {{
-    "id": "TC001",
-    "title": "Verify Discount Code",
-    "description": "Enter 'SAVE15' and check if price updates",
-    "preconditions": "Cart must have items",
-    "steps": [
-      "Add item to cart",
-      "Wait for cart summary to be visible",
-      "Enter 'SAVE15'",
-      "Click Apply",
-      "Verify price is reduced"
-    ],
-    "expected_result": "Total reduced by 15%",
-    "source_file": "checkout.html"
-  }}
-]
-OR 
-OUTPUT FORMAT EXAMPLE (USE THIS EXACT NEWLINE STYLE):
-
-[
-  {{
-    "id": "TC001",
-    "title": "Verify Empty cart code",
-    "description": "Cart is empty return issue",
-    "preconditions": "Cart must be empty",
-    "steps": [
-      "dont add items to cart. leave it empty." 
-      "Check for cart if not found return cart empty",
-    ],
-    "expected_result": "Cart is empty",
-    "source_file": "checkout.html"
-  }}
-]
-
-REQUIREMENTS ABOUT NEWLINES:
-- NO empty lines inside JSON objects
-- ONE blank line AFTER the array example
-- Steps MUST be an array with ONE step per string
-- NO trailing commas anywhere
-- NO markdown formatting
-- NO explanation
-
-        """
-    )
-
-    chain = prompt | llm | StrOutputParser()
-    raw = chain.invoke({"context": context_text, "query": query})
-    return clean_and_parse_json(raw)
+from helpers import (
+    get_llm, 
+    load_chroma, 
+    get_stored_html_details, 
+    extract_selectors, 
+    clean_python_code
+)
 
 def generate_selenium_script(db_id, selected_test_case):
     html_path, html_filename, html_content = get_stored_html_details()
@@ -401,8 +176,7 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
     TARGET HTML FILE: {filename}
     TARGET HTML CONTENT:
     {html_code}
-    
-    Use full template instead of generating half code.
+    RE-WRITE THE FULL SKELETON. Do not just output the logic block.
     ------------------------------------------------
     GENERATE THE PYTHON SCRIPT USING THIS SKELETON:
     
@@ -450,10 +224,9 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
         try:
             # Wait only 2 seconds to see if it appears
             WebDriverWait(driver, timeout).until(EC.visibility_of_element_located(selector))
-            raise AssertionError(f"Element {{selector}} appeared, but should be hidden!")
+            raise AssertionError(f"Element {selector_map} appeared, but should be hidden!")
         except TimeoutException:
             # If it times out, that means it's NOT visible, which is GOOD for this test
-            pass
 
     def run_test():
         driver = setup_driver()
@@ -462,14 +235,12 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
             driver.get(get_html_path())
             time.sleep(2)
             
-            # --- GENERATED LOGIC STARTS HERE ---
             # [AI: 1. SETUP & PAGE LOAD]
             # [AI: 2. ADD ITEM TO CART (TRIGGER VISIBILITY)]
             # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
             # [AI: 4. APPLY DISCOUNT (If in steps)]
             # [AI: 5. FILL FORM (#fullname, #email, #address)]
             # [AI: 6. CLICK PAY (If in steps)]
-            # --- GENERATED LOGIC ENDS HERE ---
             
             print("Test Completed ")
             

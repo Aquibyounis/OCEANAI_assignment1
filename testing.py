@@ -39,10 +39,19 @@ def handle_alert(driver):
     except (TimeoutException, NoAlertPresentException):
         return None
 
+def verify_element_not_visible(driver, selector, timeout=2):
+    try:
+        # Wait only 2 seconds to see if it appears
+        WebDriverWait(driver, timeout).until(EC.visibility_of_element_located(selector))
+        raise AssertionError(f"Element {selector} appeared, but should be hidden!")
+    except TimeoutException:
+        # If it times out, that means it's NOT visible, which is GOOD for this test
+        pass
+
 def run_test():
     driver = setup_driver()
     try:
-        print(f"🚀 Starting Test: TC003")
+        print(f"🚀 Starting Test: TC004")
         driver.get(get_html_path())
         time.sleep(2)
         
@@ -54,13 +63,13 @@ def run_test():
         # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
         WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "cart-summary")))
         # [AI: 4. APPLY DISCOUNT (If in steps)]
-        driver.find_element(By.ID, "discount-code").send_keys("INVALIDCODE")
+        driver.find_element(By.ID, "discount-code").send_keys("OCEAN20")
         driver.find_element(By.CSS_SELECTOR, ".discount-group button").click()
         handle_alert(driver)
         time.sleep(1)
         # [AI: 5. FILL FORM (#fullname, #email, #address)]
         driver.find_element(By.ID, "fullname").send_keys("John Doe")
-        driver.find_element(By.ID, "email").send_keys("johndoe@example.com")
+        driver.find_element(By.ID, "email").send_keys("john.doe@example.com")
         driver.find_element(By.ID, "address").send_keys("123 Main St")
         # [AI: 6. CLICK PAY (If in steps)]
         driver.find_element(By.CSS_SELECTOR, ".pay-btn").click()
