@@ -157,33 +157,80 @@ def generate_test_cases(db_id, query):
     llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
         """
-        You are a Senior QA Lead.
-        CONTEXT: {context}
-        REQUEST: {query}
-        
-        INSTRUCTIONS:
-        1. Analyze the requirements deeply.
-        2. Generate a comprehensive Test Plan for the provided HTML.
-        3. **FORMAT:** Return a raw JSON LIST (Array of Objects).
-        4. **CRITICAL HTML ANALYSIS:**
-           - Look for `style="display: none;"` (like #cart-summary).
-           - IF a test involves the cart, discount, or checkout, YOU MUST generate a Step 1: "Add item to cart" to make the section visible.
-        5. **CSS RULES:** When defining steps or selectors, ALWAYS put a space between parent and child.
-           - Correct: "#cart .btn"
-           - Wrong: "#cart.btn" (This means ID=cart AND Class=btn on same element).
-        
-        OUTPUT SCHEMA (JSON List):
-        [
-            {{
-                "id": "TC001",
-                "title": "Verify Discount Code",
-                "description": "Enter 'SAVE15' and check if price updates",
-                "preconditions": "Cart must have items",
-                "steps": "1. Add item to cart\\n2. Wait for cart summary\\n3. Enter Code\\n4. Click Apply",
-                "expected_result": "Total reduced by 15%",
-                "source_file": "checkout.html"
-            }}
-        ]
+You are a Senior QA Lead.
+CONTEXT: {context}
+REQUEST: {query}
+
+INSTRUCTIONS:
+1. Analyze the HTML deeply.
+2. Generate ONLY test cases that can be executed using the given HTML structure.
+3. DO NOT include any steps that involve:
+   - filling checkout form
+   - clicking Pay
+   - submitting checkout
+   unless the user explicitly requests a checkout test.
+4. Steps should reflect ONLY elements visible in HTML.
+5. Steps MUST NOT go beyond the test case goal.
+6. Always consider visibility flow:
+   - cart-summary is hidden until item added
+   - discount section is inside cart-summary
+7. FORMAT RULE: Output only RAW JSON ARRAY.
+8. Each object MUST contain:
+   - id
+   - title
+   - description
+   - preconditions
+   - steps (ARRAY OF STRINGS, not one string)
+   - expected_result
+   - source_file
+9. Generate steps inside based on intent of title, Strictly based on TITLE
+10. Tell if there will be any alerts inside the steps too like when something trigger alert or message then what to do strictly based on existing html.
+
+OUTPUT FORMAT EXAMPLE (USE THIS EXACT NEWLINE STYLE):
+
+[
+  {{
+    "id": "TC001",
+    "title": "Verify Discount Code",
+    "description": "Enter 'SAVE15' and check if price updates",
+    "preconditions": "Cart must have items",
+    "steps": [
+      "Add item to cart",
+      "Wait for cart summary to be visible",
+      "Enter 'SAVE15'",
+      "Click Apply",
+      "Verify price is reduced"
+    ],
+    "expected_result": "Total reduced by 15%",
+    "source_file": "checkout.html"
+  }}
+]
+OR 
+OUTPUT FORMAT EXAMPLE (USE THIS EXACT NEWLINE STYLE):
+
+[
+  {{
+    "id": "TC001",
+    "title": "Verify Empty cart code",
+    "description": "Cart is empty return issue",
+    "preconditions": "Cart must be empty",
+    "steps": [
+      "dont add items to cart. leave it empty." 
+      "Check for cart if not found return cart empty",
+    ],
+    "expected_result": "Cart is empty",
+    "source_file": "checkout.html"
+  }}
+]
+
+REQUIREMENTS ABOUT NEWLINES:
+- NO empty lines inside JSON objects
+- ONE blank line AFTER the array example
+- Steps MUST be an array with ONE step per string
+- NO trailing commas anywhere
+- NO markdown formatting
+- NO explanation
+
         """
     )
 
@@ -219,6 +266,7 @@ You must read:
 {selector_map}
 
 Your job is to:
+- Follow do or dont of steps in test cases.
 - Understand the DOM structure
 - Understand the user flow and HTML flow sequence
 - Map test steps to real HTML elements

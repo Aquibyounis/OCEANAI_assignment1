@@ -42,7 +42,7 @@ def handle_alert(driver):
 def run_test():
     driver = setup_driver()
     try:
-        print(f"🚀 Starting Test: TC001")
+        print(f"🚀 Starting Test: TC003")
         driver.get(get_html_path())
         time.sleep(2)
         
@@ -54,7 +54,7 @@ def run_test():
         # [AI: 3. WAIT FOR #cart-summary TO BE VISIBLE]
         WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "cart-summary")))
         # [AI: 4. APPLY DISCOUNT (If in steps)]
-        driver.find_element(By.ID, "discount-code").send_keys("SAVE15")
+        driver.find_element(By.ID, "discount-code").send_keys("INVALIDCODE")
         driver.find_element(By.CSS_SELECTOR, ".discount-group button").click()
         handle_alert(driver)
         time.sleep(1)
