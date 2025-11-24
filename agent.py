@@ -349,6 +349,10 @@ Your job is to:
            time.sleep(1)
      - For Negative Tests (e.g., 'Verify Empty', 'Verify Not Visible'): DO NOT use the standard 10-second wait. You MUST use verify_element_not_visible(driver, selector, timeout=2) to avoid waiting unnecessarily.
 
+9. CRITICAL SYNTAX RULES:
+1. **DOUBLE PARENTHESES:** When using `EC.visibility_of...` or `EC.element_to_be_clickable`, you MUST use **double parentheses** because they take a tuple.
+   - ❌ Wrong: `EC.visibility_of_element_located(By.ID, "foo")`
+   - ✅ Right: `EC.visibility_of_element_located((By.ID, "foo"))`
 ===============================================================
 🔥 VALID SELECTORS FROM ACTUAL HTML (DO NOT USE ANYTHING OUTSIDE THIS)
 ===============================================================
