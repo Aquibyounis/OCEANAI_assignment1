@@ -100,7 +100,6 @@ def extract_selectors(html_content):
     ids = re.findall(r'id="([^"]+)"', html_content)
     classes = re.findall(r'class="([^"]+)"', html_content)
 
-    # Flatten class list (split multi-class entries)
     class_list = []
     for c in classes:
         class_list.extend(c.split())
@@ -111,15 +110,12 @@ def extract_selectors(html_content):
 
     selector_doc = []
 
-    # Add IDs
     for i in ids:
         selector_doc.append(f"ID: #{i}")
 
-    # Add classes
     for c in class_list:
         selector_doc.append(f"CLASS: .{c}")
 
-    # Add buttons with context
     for btn in buttons:
         if 'class="' in btn:
             cls = re.findall(r'class="([^"]+)"', btn)[0].split()[0]
@@ -127,19 +123,108 @@ def extract_selectors(html_content):
         else:
             selector_doc.append("BUTTON: <button> (no class)")
 
-    # Add inputs
     for inp in inputs:
         id_match = re.findall(r'id="([^"]+)"', inp)
         if id_match:
             selector_doc.append(f"INPUT: #{id_match[0]}")
 
-    # Add textareas
     for ta in textareas:
         id_match = re.findall(r'id="([^"]+)"', ta)
         if id_match:
             selector_doc.append(f"TEXTAREA: #{id_match[0]}")
 
     return "\n".join(selector_doc)
+
+def analyze_html_structure(html_content):
+    """Analyzes HTML to extract DOM structure, visibility logic, and data flow"""
+    
+    analysis = {
+        "hidden_elements": [],
+        "conditional_visibility": [],
+        "parent_child_relationships": [],
+        "event_triggers": [],
+        "data_flow_sequence": []
+    }
+    
+    # Find hidden elements
+    hidden_pattern = r'<(\w+)[^>]*style="[^"]*display:\s*none[^"]*"[^>]*(?:id="([^"]+)")?[^>]*>'
+    for match in re.finditer(hidden_pattern, html_content, re.IGNORECASE):
+        element_type = match.group(1)
+        element_id = match.group(2) if match.group(2) else "unknown"
+        analysis["hidden_elements"].append(f"{element_type}#{element_id}")
+    
+    # Find parent-child relationships for hidden containers
+    cart_pattern = r'<div[^>]*id="cart-summary"[^>]*>(.+?)</div>\s*</div>'
+    cart_match = re.search(cart_pattern, html_content, re.DOTALL | re.IGNORECASE)
+    if cart_match:
+        inner_content = cart_match.group(1)
+        if 'discount' in inner_content.lower():
+            analysis["parent_child_relationships"].append(
+                "CRITICAL: #cart-summary contains discount section (both hidden initially)"
+            )
+        if 'id="subtotal"' in inner_content:
+            analysis["parent_child_relationships"].append(
+                "CRITICAL: #cart-summary contains price elements (#subtotal, #total-price)"
+            )
+    
+    # Detect JavaScript event triggers
+    onclick_pattern = r'onclick="([^"]+)"'
+    for match in re.finditer(onclick_pattern, html_content):
+        func_call = match.group(1)
+        analysis["event_triggers"].append(f"JavaScript: {func_call}")
+    
+    # Analyze conditional visibility logic
+    if 'style="display: none;"' in html_content and 'cart-summary' in html_content:
+        analysis["conditional_visibility"].append(
+            "VISIBILITY RULE: #cart-summary hidden until item added to cart"
+        )
+        analysis["conditional_visibility"].append(
+            "CONSEQUENCE: All child elements inside #cart-summary are inaccessible until cart has items"
+        )
+    
+    # Build data flow sequence
+    if '.product-card' in html_content and 'addToCart' in html_content:
+        analysis["data_flow_sequence"].append("STEP 1: User clicks product 'Add to Cart' button")
+        analysis["data_flow_sequence"].append("STEP 2: JavaScript addToCart() executes")
+        analysis["data_flow_sequence"].append("STEP 3: #cart-summary becomes visible (display:block)")
+        analysis["data_flow_sequence"].append("STEP 4: Cart elements (#discount-code, #subtotal, etc.) become accessible")
+        analysis["data_flow_sequence"].append("STEP 5: User can now interact with cart features")
+    
+    # Format output
+    output = []
+    output.append("═══ HTML STRUCTURE ANALYSIS ═══\n")
+    
+    if analysis["hidden_elements"]:
+        output.append("🔒 HIDDEN ELEMENTS (display:none):")
+        for elem in analysis["hidden_elements"]:
+            output.append(f"  - {elem}")
+        output.append("")
+    
+    if analysis["conditional_visibility"]:
+        output.append("⚠️  CONDITIONAL VISIBILITY LOGIC:")
+        for rule in analysis["conditional_visibility"]:
+            output.append(f"  - {rule}")
+        output.append("")
+    
+    if analysis["parent_child_relationships"]:
+        output.append("🔗 PARENT-CHILD DEPENDENCIES:")
+        for rel in analysis["parent_child_relationships"]:
+            output.append(f"  - {rel}")
+        output.append("")
+    
+    if analysis["data_flow_sequence"]:
+        output.append("📊 DATA FLOW SEQUENCE:")
+        for step in analysis["data_flow_sequence"]:
+            output.append(f"  {step}")
+        output.append("")
+    
+    if analysis["event_triggers"]:
+        output.append("⚡ JAVASCRIPT EVENT TRIGGERS:")
+        for trigger in analysis["event_triggers"][:5]:  # Limit to 5
+            output.append(f"  - {trigger}")
+        output.append("")
+    
+    return "\n".join(output)
 
 
 def generate_test_cases(db_id, query):
@@ -156,35 +241,48 @@ def generate_test_cases(db_id, query):
 
     llm = get_llm()
     prompt = ChatPromptTemplate.from_template(
-        """
-        You are a Senior QA Lead.
-        CONTEXT: {context}
-        REQUEST: {query}
-        
-        INSTRUCTIONS:
-        1. Analyze the requirements deeply.
-        2. Generate a comprehensive Test Plan for the provided HTML.
-        3. **FORMAT:** Return a raw JSON LIST (Array of Objects).
-        4. **CRITICAL HTML ANALYSIS:**
-           - Look for `style="display: none;"` (like #cart-summary).
-           - IF a test involves the cart, discount, or checkout, YOU MUST generate a Step 1: "Add item to cart" to make the section visible.
-        5. **CSS RULES:** When defining steps or selectors, ALWAYS put a space between parent and child.
-           - Correct: "#cart .btn"
-           - Wrong: "#cart.btn" (This means ID=cart AND Class=btn on same element).
-        
-        OUTPUT SCHEMA (JSON List):
-        [
-            {{
-                "id": "TC001",
-                "title": "Verify Discount Code",
-                "description": "Enter 'SAVE15' and check if price updates",
-                "preconditions": "Cart must have items",
-                "steps": "1. Add item to cart\\n2. Wait for cart summary\\n3. Enter Code\\n4. Click Apply",
-                "expected_result": "Total reduced by 15%",
-                "source_file": "checkout.html"
-            }}
-        ]
-        """
+        """You are an Expert QA Test Designer. Your ONLY job is to analyze requirements and design precise, actionable test cases.
+
+CONTEXT:
+{context}
+
+USER REQUEST:
+{query}
+
+CRITICAL RULES:
+1. Each test case tests ONE specific behavior
+2. Steps must be MINIMAL and SPECIFIC - only include actions directly related to the test objective
+3. Do NOT add extra steps beyond what's needed to verify the specific behavior
+4. Preconditions identify what must be true BEFORE the test starts
+5. Steps describe ONLY the actions needed to test the specific functionality
+6. Expected result describes ONLY the outcome being verified
+
+EXAMPLE - GOOD vs BAD:
+❌ BAD (over-specified):
+Test: "Verify discount code applies"
+Steps: "1. Add item to cart\n2. Wait for cart\n3. Enter code\n4. Click apply\n5. Fill name\n6. Fill email\n7. Submit form"
+→ Why bad? Steps 5-7 are NOT needed to verify discount application
+
+✅ GOOD (precise):
+Test: "Verify discount code applies"
+Preconditions: "Cart contains at least one item"
+Steps: "1. Enter discount code 'SAVE15'\n2. Click Apply button"
+Expected: "Discount of 15% applied, total price reduced accordingly"
+
+OUTPUT FORMAT (JSON array only, no markdown):
+[
+  {{
+    "id": "TC001",
+    "title": "Brief test objective",
+    "description": "What specific behavior is being tested",
+    "preconditions": "State that must exist before test runs",
+    "steps": "Numbered steps - ONLY actions needed for THIS test",
+    "expected_result": "Specific, observable outcome",
+    "source_file": "filename.html"
+  }}
+]
+
+Now generate test cases following these rules exactly."""
     )
 
     chain = prompt | llm | StrOutputParser()
@@ -194,6 +292,7 @@ def generate_test_cases(db_id, query):
 def generate_selenium_script(db_id, selected_test_case):
     html_path, html_filename, html_content = get_stored_html_details()
     selector_map = extract_selectors(html_content)
+    html_analysis = analyze_html_structure(html_content)
 
     if not html_content:
         return "# No HTML found."
@@ -510,11 +609,14 @@ Analyze the HTML structure → Derive prerequisites → Implement test → Verif
         raw = chain.invoke({
             "id": selected_test_case.get("id"),
             "title": selected_test_case.get("title"),
+            "description": selected_test_case.get("description", ""),
+            "preconditions": selected_test_case.get("preconditions", "None"),
             "steps": selected_test_case.get("steps"),
             "expected_result": selected_test_case.get("expected_result"),
             "html_code": html_content,
             "filename": html_filename,
-            "selector_map": selector_map
+            "selector_map": selector_map,
+            "html_analysis": html_analysis
         })
         return clean_python_code(raw)
     except Exception as e:
