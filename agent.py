@@ -432,8 +432,8 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
     def get_html_path():
         base_dir = pathlib.Path(__file__).parent.absolute()
         possible_paths = [
-            base_dir / "checkout.html",
-            base_dir / "stored_files" / "checkout.html"
+            base_dir / "{filename}",
+            base_dir / "stored_files" / "{filename}"
         ]
         for p in possible_paths:
             if p.exists():

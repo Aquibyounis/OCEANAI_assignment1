@@ -42,9 +42,9 @@ if not st.session_state.selected_db:
         st.session_state.selected_db = latest
 
 tab1, tab2, tab3 = st.tabs([
-    "📂 Phase 1: Knowledge Base",
-    "🧠 Phase 2: Test Agent",
-    "💻 Phase 3: Selenium Scripts"
+    "🧠 Phase 1: Knowledge Base",
+    "🧪 Phase 2: Test Agent",
+    "🤖 Phase 3: Selenium Scripts"
 ])
 
 # ------------------ PHASE 1 ------------------

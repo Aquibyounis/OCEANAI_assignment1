@@ -47,7 +47,6 @@ pip install -r requirements.txt
 ## Create `.env`
 ```
 "OPENROUTER_API_KEY=" | Out-File .env 
-mkdir -p chroma_db
 ```
 Paste the API key (you will create in next step) with **NO** Quotations
 

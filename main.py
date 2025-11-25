@@ -213,7 +213,7 @@ async def ingest_knowledge_base(
         )
 
         return ProcessResponse(
-            message=f"Knowledge Base built and saved to {persist_dir}",
+            message=f"Knowledge Base built",
             chunks_count=len(chunks),
             db_id=entry["id"],
             persist_dir=persist_dir
