@@ -19,7 +19,7 @@ This README focuses on reproducible local setup and quickly getting the app runn
 ## Table of Contents
 - [Software Requirements](#software-requirements)
 - [Quick Setup](#quick-setup-windows---powershell)
-- [Create `.env` & Database Folder](#create-env--database-folder)
+- [Create `.env`](#create-env--database-folder)
 - [Create OpenRouter API Key](#create-openrouter-api-key)
 - [Running Locally (two terminals)](#running-locally-two-terminals)
 - [Troubleshooting](#troubleshooting)
@@ -35,7 +35,7 @@ This README focuses on reproducible local setup and quickly getting the app runn
 - Optional: `virtualenv` (or use `python -m venv`)
 
 ---
-## Instructions to set up repo on your local machine
+## Quick Setup
 ```bash
 git clone "https://github.com/Aquibyounis/OCEANAI_assignment1.git"
 cd OCEANAI_assignment1
@@ -44,7 +44,7 @@ source venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
-## Creating .env & databases
+## Create `.env`
 ```
 "OPENROUTER_API_KEY=" | Out-File .env 
 mkdir -p chroma_db
@@ -56,7 +56,7 @@ Format is -
 OPENROUTER_API_KEY=sk-or-v1-5.....c
 ```
 
-## Creating Your OpenRouter API Key
+## Create OpenRouter API Key
 
 To use OpenRouter as your LLM provider, you must generate an API key.
 
@@ -71,7 +71,7 @@ To use OpenRouter as your LLM provider, you must generate an API key.
 7. Paste it in env with no quotations.
 
 
-## Running the code
+## Running Locally (two terminals)
 
 ### Open 2 terminals in vscode
 ### Terminal-1: 
@@ -85,7 +85,7 @@ venv\scripts\activate
 python main.py
 ```
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 Below are the most common issues you may encounter while running OceanAI locally, along with their solutions.
 
