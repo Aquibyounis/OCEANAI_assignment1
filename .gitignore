@@ -5,3 +5,4 @@ venv/
 chroma_db/
 databases/
 *.log
+stored_files/

@@ -90,11 +90,6 @@ with tab1:
         else:
             st.warning("Upload at least one support doc and a target HTML (or ensure local checkout.html exists).")
 
-    # Informational status only (no DB selector shown)
-    if st.session_state.selected_db:
-        st.success(f"Using Knowledge Base: {st.session_state.selected_db}")
-    else:
-        st.info("No knowledge base available yet. Ingest files to create one.")
 
 # ------------------ PHASE 2 ------------------
 with tab2:
