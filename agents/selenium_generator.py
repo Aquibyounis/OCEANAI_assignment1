@@ -202,8 +202,8 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
     def get_html_path():
         base_dir = pathlib.Path(__file__).parent.absolute()
         possible_paths = [
-            base_dir / "checkout.html",
-            base_dir / "stored_files" / "checkout.html"
+            base_dir / "{filename}",
+            base_dir / "stored_files" / "{filename}"
         ]
         for p in possible_paths:
             if p.exists():
@@ -227,6 +227,7 @@ END OF SYSTEM INSTRUCTIONS — NOW FOLLOW THE USER TEMPLATE
             raise AssertionError(f"Element {selector_map} appeared, but should be hidden!")
         except TimeoutException:
             # If it times out, that means it's NOT visible, which is GOOD for this test
+            pass
 
     def run_test():
         driver = setup_driver()
