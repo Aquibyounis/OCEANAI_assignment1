@@ -18,8 +18,8 @@ This README focuses on reproducible local setup and quickly getting the app runn
 
 ## Table of Contents
 - [Software Requirements](#software-requirements)
-- [Quick Setup](#quick-setup-windows---powershell)
-- [Create `.env`](#create-env--database-folder)
+- [Quick Setup](#quick-setup)
+- [Create `.env`](#create-env)
 - [Create OpenRouter API Key](#create-openrouter-api-key)
 - [Running Locally (two terminals)](#running-locally-two-terminals)
 - [Troubleshooting](#troubleshooting)
