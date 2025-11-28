@@ -12,7 +12,7 @@ selenium
 webdriver-manager
 torch
 langchain_text_splitters
-google-generativeai
+
 langchain_huggingface
 langchain_chroma
 langchain_community
