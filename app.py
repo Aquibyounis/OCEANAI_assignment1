@@ -5,41 +5,19 @@ import streamlit as st
 from agent import generate_test_cases, generate_selenium_script
 
 BACKEND_URL = "http://127.0.0.1:8000"
-# Path of the uploaded HTML file available in the environment (provided to assistant)
 LOCAL_HTML_PATH = "/mnt/data/44f69aee-a339-48e3-853c-0ebabea98a94.html"
 
 st.set_page_config(page_title="QA Agent", layout="wide")
 st.title("🤖 Autonomous QA Agent")
 
+# session state
 if "test_plan" not in st.session_state:
     st.session_state.test_plan = None
 
+# Do NOT auto-populate selected_db from any existing DBs.
+# selected_db will only be set when /ingest returns a db_id for the current run.
 if "selected_db" not in st.session_state:
     st.session_state.selected_db = None
-
-# Try to fetch latest DB from backend on startup (no UI for choosing)
-def fetch_latest_db():
-    try:
-        resp = requests.get(f"{BACKEND_URL}/databases", timeout=5)
-        if resp.status_code == 200:
-            data = resp.json().get("databases", [])
-            if not data:
-                return None
-            # data is expected to be a list of dicts with keys "id" and "created_at"
-            # choose the most recent by created_at if present
-            try:
-                latest = sorted(data, key=lambda x: x.get("created_at", ""), reverse=True)[0]
-                return latest.get("id")
-            except Exception:
-                return data[0].get("id")
-    except Exception:
-        return None
-
-# Auto-populate selected_db from backend (latest) if not already set
-if not st.session_state.selected_db:
-    latest = fetch_latest_db()
-    if latest:
-        st.session_state.selected_db = latest
 
 tab1, tab2, tab3 = st.tabs([
     "🧠 Phase 1: Knowledge Base",
@@ -49,54 +27,102 @@ tab1, tab2, tab3 = st.tabs([
 
 # ------------------ PHASE 1 ------------------
 with tab1:
-    st.header("Build Knowledge Base")
+    st.header("Build Knowledge Base (Ingestion)")
+
     col1, col2 = st.columns(2)
     with col1:
-        uploaded_docs = st.file_uploader("Support Docs (PDF, MD, JSON)", accept_multiple_files=True)
+        uploaded_docs = st.file_uploader("Support Docs (PDF, MD, JSON) — required", accept_multiple_files=True)
+
     with col2:
-        uploaded_html = st.file_uploader("Target HTML (checkout.html)", type=["html"])
+        st.markdown("**HTML**")
+        html_input_mode = st.radio(
+            "Choose HTML input method:",
+            ("Upload HTML file", "Paste HTML code"),
+            index=0
+        )
+
+        uploaded_html = None
+        pasted_html = None
+
+        if html_input_mode == "Upload HTML file":
+            uploaded_html = st.file_uploader("Target HTML (checkout.html)", type=["html"], key="html_uploader")
+        elif html_input_mode == "Paste HTML code":
+            pasted_html = st.text_area("Paste HTML code here", height=250, key="html_paste")
 
     if st.button("🚀 Build Brain", type="primary"):
-        if (uploaded_docs and (uploaded_html or os.path.exists(LOCAL_HTML_PATH))) or (uploaded_docs and uploaded_html):
-            with st.spinner("Ingesting..."):
-                files = []
-                for d in uploaded_docs:
-                    files.append(("files", (d.name, d.getvalue(), d.type)))
-
-                # Prefer user-uploaded HTML; fallback to local HTML file path if not uploaded
-                if uploaded_html:
-                    files.append(("html_file", (uploaded_html.name, uploaded_html.getvalue(), uploaded_html.type)))
-                elif os.path.exists(LOCAL_HTML_PATH):
-                    # read local file bytes and send it
-                    with open(LOCAL_HTML_PATH, "rb") as f:
-                        files.append(("html_file", (os.path.basename(LOCAL_HTML_PATH), f.read(), "text/html")))
-
-                try:
-                    resp = requests.post(f"{BACKEND_URL}/ingest", files=files, timeout=120)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        st.success(data.get("message", "Ingest completed."))
-                        # backend should return db_id - if so, set it as selected DB
-                        db_id = data.get("db_id") or data.get("dbId") or data.get("id")
-                        if db_id:
-                            st.session_state.selected_db = db_id
-                        else:
-                            # fallback: re-fetch latest DB list
-                            st.session_state.selected_db = fetch_latest_db()
-                    else:
-                        st.error(resp.text)
-                except Exception as e:
-                    st.error(f"Connection Error: {e}")
+        # Require support docs
+        if not uploaded_docs or len(uploaded_docs) == 0:
+            st.warning("Upload at least one support doc (PDF, MD, JSON) — building requires support docs.")
         else:
-            st.warning("Upload at least one support doc and a target HTML (or ensure local checkout.html exists).")
+            # Decide which HTML to use (upload > paste > local-if-selected)
+            html_available = False
+            html_bytes = None
+            html_filename = None
 
+            if html_input_mode == "Upload HTML file" and uploaded_html:
+                html_available = True
+                html_filename = uploaded_html.name
+                html_bytes = uploaded_html.getvalue()
+            elif html_input_mode == "Paste HTML code" and pasted_html and pasted_html.strip():
+                html_available = True
+                html_filename = "pasted.html"
+                html_bytes = pasted_html.encode("utf-8")
+            elif html_input_mode == "Use local HTML (fallback only)":
+                # only allow local if that mode explicitly selected
+                if os.path.exists(LOCAL_HTML_PATH):
+                    try:
+                        with open(LOCAL_HTML_PATH, "rb") as f:
+                            html_available = True
+                            html_filename = os.path.basename(LOCAL_HTML_PATH)
+                            html_bytes = f.read()
+                    except Exception as e:
+                        st.error(f"Failed to read local HTML: {e}")
+                        html_available = False
+
+            if not html_available:
+                st.warning("Provide a target HTML: upload a file, paste HTML code, or choose local HTML (and ensure it exists).")
+            else:
+                with st.spinner("Ingesting and creating a new Knowledge DB..."):
+                    files = []
+                    # add support docs
+                    for d in uploaded_docs:
+                        files.append(("files", (d.name, d.getvalue(), d.type)))
+
+                    # attach the chosen HTML bytes
+                    files.append(("html_file", (html_filename, html_bytes, "text/html")))
+
+                    try:
+                        resp = requests.post(f"{BACKEND_URL}/ingest", files=files, timeout=120)
+                    except Exception as e:
+                        st.error(f"Connection Error: {e}")
+                        resp = None
+
+                    if not resp:
+                        st.error("No response from backend. Ensure the backend is running and accessible.")
+                    else:
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            st.success(data.get("message", "Ingest completed."))
+                            # IMPORTANT: only accept db_id returned by this ingest call
+                            db_id = data.get("db_id") or data.get("dbId") or data.get("id")
+                            if db_id:
+                                st.session_state.selected_db = db_id
+                                st.success("New Knowledge DB created and selected for this session.")
+                            else:
+                                # Do NOT auto-select any old/existing DBs.
+                                st.warning(
+                                    "Ingest succeeded but backend did not return a new db_id. "
+                                    "Please check backend response and try again."
+                                )
+                        else:
+                            st.error(f"Ingest failed: {resp.status_code} - {resp.text}")
 
 # ------------------ PHASE 2 ------------------
 with tab2:
     st.header("Generate Test Cases")
-
+    # Strong enforcement: require selected_db created in this session
     if not st.session_state.selected_db:
-        st.warning("Please build a knowledge base in Phase 1.")
+        st.error("No Knowledge Base available for this session. Please go to Phase 1, upload support docs and HTML, and click 'Build Brain' to create a new Knowledge DB.")
     else:
         user_query = st.text_input("Describe what to test:", "Generate test cases for the discount code feature.")
 
