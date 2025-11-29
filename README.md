@@ -3,7 +3,8 @@
 This project includes setup instructions, environment configuration, dependency installation, running the app (Streamlit + agents), and few troubleshooting tips.
 
 ---
-
+## AWS Hosted Link - 
+   ➡️ http://aquibyounisoceanai.duckdns.org/
 ## Project Overview
 
 OceanAI is built on RAG with 2 Agents using:
