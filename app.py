@@ -52,7 +52,10 @@ with tab1:
     st.header("Build Knowledge Base")
     col1, col2 = st.columns(2)
     with col1:
-        uploaded_docs = st.file_uploader("Support Docs (PDF, MD, JSON)", accept_multiple_files=True)
+        uploaded_docs = st.file_uploader(
+            "Support Docs (PDF, MD, JSON)",
+            accept_multiple_files=True
+        )
     with col2:
         # add radio for upload vs paste HTML while keeping UI otherwise unchanged
         html_input_mode = st.radio(
@@ -65,30 +68,41 @@ with tab1:
         pasted_html = None
 
         if html_input_mode == "Upload HTML file":
-            uploaded_html = st.file_uploader("Target HTML (checkout.html)", type=["html"])
+            uploaded_html = st.file_uploader(
+                "Target HTML (checkout.html)",
+                type=["html"]
+            )
         elif html_input_mode == "Paste HTML code":
             pasted_html = st.text_area("Paste HTML code here", height=250)
 
     if st.button("🚀 Build Brain", type="primary"):
-        # accept pasted_html as valid source as well as uploaded_html or local file
-        if (uploaded_docs and ((uploaded_html and uploaded_html is not None) or (pasted_html and pasted_html.strip()) or os.path.exists(LOCAL_HTML_PATH))) or (uploaded_docs and uploaded_html):
+        # need at least one support doc AND some HTML (uploaded or pasted)
+        has_html = (uploaded_html is not None) or (pasted_html and pasted_html.strip())
+        if uploaded_docs and has_html:
             with st.spinner("Ingesting..."):
                 files = []
+
+                # support docs
                 for d in uploaded_docs:
                     files.append(("files", (d.name, d.getvalue(), d.type)))
 
-                # Prefer user-uploaded HTML; then pasted HTML; fallback to local HTML file path if not uploaded/pasted
-                if uploaded_html and uploaded_html is not None:
-                    files.append(("html_file", (uploaded_html.name, uploaded_html.getvalue(), uploaded_html.type)))
+                # HTML: always send with filename "checkout.html"
+                if uploaded_html is not None:
+                    html_bytes = uploaded_html.getvalue()
+                    files.append(
+                        ("html_file", ("checkout.html", html_bytes, "text/html"))
+                    )
                 elif pasted_html and pasted_html.strip():
-                    files.append(("html_file", ("pasted.html", pasted_html.encode("utf-8"), "text/html")))
-                elif os.path.exists(LOCAL_HTML_PATH):
-                    # read local file bytes and send it
-                    with open(LOCAL_HTML_PATH, "rb") as f:
-                        files.append(("html_file", (os.path.basename(LOCAL_HTML_PATH), f.read(), "text/html")))
+                    files.append(
+                        ("html_file", ("checkout.html", pasted_html.encode("utf-8"), "text/html"))
+                    )
 
                 try:
-                    resp = requests.post(f"{BACKEND_URL}/ingest", files=files, timeout=120)
+                    resp = requests.post(
+                        f"{BACKEND_URL}/ingest",
+                        files=files,
+                        timeout=120
+                    )
                     if resp.status_code == 200:
                         data = resp.json()
                         st.success(data.get("message", "Ingest completed."))
@@ -104,7 +118,10 @@ with tab1:
                 except Exception as e:
                     st.error(f"Connection Error: {e}")
         else:
-            st.warning("Upload at least one support doc and a target HTML (or ensure local checkout.html exists).")
+            st.warning(
+                "Upload at least one support doc and provide a target HTML "
+                "(either upload or paste the HTML code)."
+            )
 
 
 # ------------------ PHASE 2 ------------------
@@ -170,6 +187,20 @@ with tab3:
                     st.session_state.selected_db,
                     selected_tc
                 )
+
+                # 🔹 Normalize `code` to a plain string
+                if isinstance(code, bytes):
+                    code = code.decode("utf-8", errors="ignore")
+
+                if isinstance(code, dict):
+                    code = (
+                        code.get("script")
+                        or code.get("code")
+                        or json.dumps(code, indent=2)
+                    )
+
+                if not isinstance(code, str):
+                    code = str(code)
 
                 st.subheader("Generated Script")
                 st.code(code, language="python")
